@@ -6,6 +6,8 @@
 #include <sys/wait.h>
 #include <readline/readline.h>
 #include <readline/history.h>
+#include <sys/types.h>
+#include <fcntl.h>
 
 int path_size;
 char PATH[50][100];
@@ -14,9 +16,10 @@ char PATH[50][100];
 void getCommand();
 void help();
 void getPath();
-
-
-
+void execCommand(char *cmd);
+int checkPipe(char *cmd);
+int checkRedirection(char *cmd);
+void execPipe(char *cmd);
 
 
 /*---------------------------MAIN-------------------------------------*/
@@ -68,7 +71,7 @@ void help(){
             "\t-u : remove variable from the environment\n\n");
 }
 
-/*---------------------Prompt_and_execution---------------------------*/
+/*---------------------Prompt_and_Input---------------------------*/
 void getCommand(){
 
     //Will store the input.
@@ -91,6 +94,16 @@ void getCommand(){
 
         //Adds the command to history
         add_history(cmd);
+
+
+        if(checkPipe(cmd)){
+            execPipe(cmd);
+            continue;
+        }        
+
+        if(checkRedirection(cmd)){
+            printf("\nRedirection found\n");
+        }        
 
         // Checks for exit
         if(strstr(cmd, "exit")){
@@ -126,58 +139,8 @@ void getCommand(){
             continue;
         }
 
-        //To prevent infinite loop
-        int success = 0;
-
-        //Initializes the filename
-        //char *filename = strcat(PATH[0], "/");
-        char *filename = NULL;
-
-        for(int i = 0; i < path_size; i++){
-           
-            //Is +2 because you need to take also '/'
-            filename = malloc((strlen(PATH[i]) * sizeof(char) + strlen(cmd) * sizeof(char) + 2));
-
-            strcpy(filename, PATH[i]);
-            strcat(filename, "/");
-            strcat(filename, cmd);
-
-            if(access(filename, F_OK) == 0){
-                
-                success = 1;
-                break;
-            }
-
-            if(i == (path_size - 1) && access(filename, F_OK) != 0){
-
-                printf("\nError: Command not found.\n");
-            }
-        }
-
-
-        //Checks if the command is not found and exists while loop
-        if(success == 0){
-            continue;
-        } 
-
-        //Starts the process
-        pid_t process = fork();
-
-        if(process == -1){
-
-            printf("Process could not be created.");
-            exit(1);
-        }
-        else if(process == 0){
-            char *argv[] = {filename, NULL};
-            execve(filename, argv, NULL);
-        }
-        else{
-            //Wait for the process to finish
-            waitpid(process, NULL, 0);
-        }
-    
-        free(filename);
+        //Execute the command
+        execCommand(cmd);
     }
 
     //Free the memeory
@@ -189,7 +152,23 @@ void getCommand(){
 /*-----------------------Get_Path-------------------------------*/
 void getPath(){
 
-    char *path = getenv("PATH");
+    //char *path = getenv("PATH");
+
+    char *path = NULL;
+    size_t size_path;
+
+    FILE *fp = popen("echo $PATH", "r");
+    if(fp == NULL){
+        printf("Failed to run command.\n");
+        return;
+    }
+    if(getline(&path, &size_path, fp) < 0){
+
+        printf("Failed to read output.\n");
+        return;
+    }
+    pclose(fp);
+
     int size = strlen(path);
 
     char new_path[size];
@@ -220,15 +199,20 @@ void getPath(){
     }
 
 
-    int num_unique_tokens = 0;  // Number of unique strings
+    // Number of unique strings
+    int num_unique_tokens = 0;  
 
     // Iterate through the original array and add unique strings to the new array
     for(int i = 0; i < num_tokens; i++){
-        int is_unique = 1;  // Assume the string is unique
+
+        // Assume the string is unique
+        int is_unique = 1;  
 
         // Check if the string is already in the unique array
         for(int j = 0; j < num_unique_tokens; j++){
+
             if(strcmp(paths[i], PATH[j]) == 0){
+
                 // The string is not unique
                 is_unique = 0;
                 break;
@@ -237,10 +221,215 @@ void getPath(){
 
         // If the string is unique, add it to the unique array
         if(is_unique){
+
             strcpy(PATH[num_unique_tokens], paths[i]);
             num_unique_tokens++;
         }
     }
 
     path_size = num_unique_tokens;
+    free(path);
 }
+
+
+/*---------------------Execute_Command---------------------------*/
+
+void execCommand(char *cmd){
+
+        
+    char *file;
+    char *rest; 
+    char *arguments[10];
+
+    int i = 0;    
+
+    file = strtok(cmd, " ");
+
+    rest = strtok(NULL, "");
+
+    arguments[i++] = file;
+
+    char *arg = strtok(rest, " ");
+
+    while(arg != NULL){
+
+        arguments[i++] = arg;
+        arg = strtok(NULL, " ");
+    }
+
+    arguments[i] = NULL;
+
+    //printf("\ncommand: %s\narguments: %s\n", file, arguments);
+    
+
+    //To prevent infinite loop
+    int success = 0;
+
+    //Initializes the filename
+    char *filename = NULL;
+
+    for(int i = 0; i < path_size; i++){
+       
+        //Is +2 because you need to add also '/'
+        filename = malloc((strlen(PATH[i]) * sizeof(char) + strlen(file) * sizeof(char) + 2));
+
+        strcpy(filename, PATH[i]);
+        strcat(filename, "/");
+        strcat(filename, file);
+
+        if(access(filename, F_OK) == 0){
+            
+            success = 1;
+            break;
+        }
+
+        if(i == (path_size - 1) && access(filename, F_OK) != 0){
+
+            printf("\nError: Command not found.\n");
+        }
+    }
+
+
+    //Checks if the command is not found and exists while loop
+    if(success == 0){
+        return;
+    } 
+
+    //Starts the process
+    pid_t process = fork();
+
+    if(process == -1){
+
+        printf("Process could not be created.");
+        exit(1);
+    }
+    else if(process == 0){
+        //char *argv[] = {filename, arguments, NULL};
+        //execve(filename, argv, NULL);
+        execve(filename, arguments, NULL);
+    }
+    else{
+        //Wait for the process to finish
+        waitpid(process, NULL, 0);
+    }
+
+    
+    free(filename);
+}
+
+
+int checkPipe(char *cmd){
+
+    if(strstr(cmd, "|"))
+        return 1;
+    else
+        return 0;
+}
+
+
+int checkRedirection(char *cmd){
+
+    if(strstr(cmd, ">"))
+        return 1;
+    else if(strstr(cmd, "<"))
+        return 1;
+    else
+        return 0;
+}
+
+void execPipe(char *cmd){
+
+    char *first_cmd;
+    char *second_cmd;
+
+    first_cmd = strtok(cmd, "|");
+    second_cmd = strtok(NULL, "") + 1;
+
+    char *first_token = strtok(first_cmd, " ");
+
+    char *cmd1 = first_token;
+
+    char *cmd1_args[10];
+
+    int argc_1 = 0;
+
+    while(first_token != NULL){
+
+        cmd1_args[argc_1] = first_token;
+        argc_1++;
+        first_token = strtok(NULL, " ");
+    }
+    
+    cmd1_args[argc_1] = NULL;
+
+
+
+    char *second_token = strtok(second_cmd, " ");
+
+    char *cmd2 = second_token;
+
+    char *cmd2_args[10];
+
+    int argc_2 = 0;
+
+    while(second_token != NULL){
+
+        cmd2_args[argc_2] = second_token;
+        argc_2++;
+        second_token = strtok(NULL, " ");
+    }
+    
+    cmd2_args[argc_2] = NULL;
+
+
+    int fd[2], id, id2;
+
+    if(pipe(fd) < 0)
+    {
+        perror ("Error creating pipe\n");
+        exit(2);
+    }
+    if ((id = fork()) < 0)
+    {
+        perror ("Error creating first child process\n");
+        exit(4);
+    }
+
+    if(id == 0)
+    {
+        if (dup2(fd[1], STDOUT_FILENO) < 0)
+        {
+            perror("Error trying to duplicate output");
+            exit(3);
+        }
+        close(fd[1]);
+        close(fd[0]);
+        execvp(cmd1, cmd1_args);
+    }
+
+    if ((id2 = fork()) < 0)
+    {
+        perror ("Error creating second child process\n");
+        exit(6);
+    }
+
+    if (id2 == 0)
+    {
+        if (dup2(fd[0], STDIN_FILENO) < 0)
+        {
+            perror("Error trying to duplicate input\n");
+            exit(5);
+        }
+        close(fd[1]);
+        close(fd[0]);
+        execvp(cmd2, cmd2_args);
+    }
+
+    close(fd[0]);
+    close(fd[1]);
+
+    waitpid(id, NULL,  0);
+    waitpid(id2, NULL, 0);
+
+}
+
