@@ -15,11 +15,14 @@ char PATH[50][100];
 
 void getCommand();
 void help();
+void version();
 void getPath();
 void execCommand(char *cmd);
 int checkPipe(char *cmd);
 int checkRedirection(char *cmd);
 void execPipe(char *cmd);
+int checkCustom(char *cmd);
+void checkCommand(char *cmd);
 
 
 /*---------------------------MAIN-------------------------------------*/
@@ -71,17 +74,31 @@ void help(){
             "\t-u : remove variable from the environment\n\n");
 }
 
+
+/*--------------------------------Version-------------------------------*/
+void version(){
+
+    printf( "\n---Version---\n\n"
+            "This application was created by Andrei Suba.\n"
+            "Student in second year, Computer Science.\n"
+            "West University of Timisoara.\n"
+            "Email: andrei.suba00@e-uvt.ro.\n\n");
+}
+
+
 /*---------------------Prompt_and_Input---------------------------*/
 void getCommand(){
 
     //Will store the input.
     char *cmd = NULL;   
 
+    //Tab completion
     rl_bind_key('\t', rl_complete);
 
+    //Starts the loop
     while(true){
 
-        cmd = readline("$:");
+        cmd = readline("$: ");
         if(!cmd){
 
             //User pressed CTRL + D (EOF)
@@ -96,51 +113,8 @@ void getCommand(){
         add_history(cmd);
 
 
-        if(checkPipe(cmd)){
-            execPipe(cmd);
-            continue;
-        }        
-
-        if(checkRedirection(cmd)){
-            printf("\nRedirection found\n");
-        }        
-
-        // Checks for exit
-        if(strstr(cmd, "exit")){
-    
-            exit(0);
-        }
-
-        // Checks for help
-        if(strstr(cmd, "help")){
-
-            help();
-            continue;
-        }
-
-        // Checks for help
-        if(strstr(cmd, "catt")){
-
-            help();
-            continue;
-        }
-
-        // Checks for help
-        if(strstr(cmd, "headd")){
-
-            help();
-            continue;
-        }
-
-        // Checks for help
-        if(strstr(cmd, "envv")){
-
-            help();
-            continue;
-        }
-
-        //Execute the command
-        execCommand(cmd);
+        //Checks the command
+        checkCommand(cmd);
     }
 
     //Free the memeory
@@ -151,8 +125,6 @@ void getCommand(){
 
 /*-----------------------Get_Path-------------------------------*/
 void getPath(){
-
-    //char *path = getenv("PATH");
 
     char *path = NULL;
     size_t size_path;
@@ -236,7 +208,6 @@ void getPath(){
 
 void execCommand(char *cmd){
 
-        
     char *file;
     char *rest; 
     char *arguments[10];
@@ -259,8 +230,6 @@ void execCommand(char *cmd){
 
     arguments[i] = NULL;
 
-    //printf("\ncommand: %s\narguments: %s\n", file, arguments);
-    
 
     //To prevent infinite loop
     int success = 0;
@@ -345,6 +314,7 @@ void execPipe(char *cmd){
     first_cmd = strtok(cmd, "|");
     second_cmd = strtok(NULL, "") + 1;
 
+    //Start the processing of the first command
     char *first_token = strtok(first_cmd, " ");
 
     char *cmd1 = first_token;
@@ -363,7 +333,7 @@ void execPipe(char *cmd){
     cmd1_args[argc_1] = NULL;
 
 
-
+    //Start the processing of the second command
     char *second_token = strtok(second_cmd, " ");
 
     char *cmd2 = second_token;
@@ -430,6 +400,76 @@ void execPipe(char *cmd){
 
     waitpid(id, NULL,  0);
     waitpid(id2, NULL, 0);
-
 }
 
+
+
+void checkCommand(char *cmd){
+
+    if(checkPipe(cmd)){
+        execPipe(cmd);
+        return;
+    }        
+
+    if(checkRedirection(cmd)){
+        printf("\nRedirection found\n");
+        return;
+    }        
+
+/*    if(checkCustom(cmd)){
+        printf("Custom command found.\n");
+    }
+    else{
+        //Execute the command
+        execCommand(cmd);
+    }
+*/
+    if(!checkCustom(cmd)){
+        execCommand(cmd);
+    }
+}
+
+
+int checkCustom(char *cmd){
+
+    // Checks for exit
+    if(strstr(cmd, "exit")){
+
+        exit(0);
+    }
+
+    // Checks for help
+    if(strstr(cmd, "help")){
+
+        help();
+        return 1;
+    }
+
+    // Checks for version
+    if(strstr(cmd, "version")){
+
+        version();
+        return 1;
+    }
+
+    // Checks for catt
+    if(strstr(cmd, "catt")){
+
+        help();
+        return 1;
+    }
+
+    // Checks for headd
+    if(strstr(cmd, "headd")){
+
+        help();
+        return 1;
+    }
+
+    // Checks for envv
+    if(strstr(cmd, "envv")){
+
+        help();
+        return 1;
+    }
+}
