@@ -14,19 +14,25 @@ char PATH[50][100];
 extern char **environ;
 
 
-void getCommand();
 void help();
+void version();
 void envv();
 void headd(int argc, char *argv[]);
 void catt(int argc, char *argv[]);
-void version();
+
 void getPath();
-void execCommand(char *cmd);
-int checkPipe(char *cmd);
-int checkRedirection(char *cmd);
-void execPipe(char *cmd);
-int checkCustom(char *cmd);
-void checkCommand(char *cmd);
+void getCommand();
+
+int checkPipe(char *original);
+int checkRedirection(char *original);
+int checkBuiltin(char *original);
+
+void execCommand(char *original);
+void execPipe(char *original);
+void execRedirection(char *original);
+
+int checkCustom(char *original);
+void checkCommand(char *original);
 
 
 /*---------------------------MAIN-------------------------------------*/
@@ -168,15 +174,18 @@ void getCommand(){
 
 
 /*---------------------Check_Command---------------------------*/
-void checkCommand(char *cmd){
+void checkCommand(char *original){
 
+    //Make a copy of the string
+    char *cmd = strdup(original);
+    
     if(checkPipe(cmd)){
         execPipe(cmd);
         return;
     }        
 
     if(checkRedirection(cmd)){
-        printf("\nRedirection found\n");
+        execRedirection(cmd);
         return;
     }        
 
@@ -187,8 +196,11 @@ void checkCommand(char *cmd){
 
 
 /*---------------------Check_Pipe---------------------------*/
-int checkPipe(char *cmd){
+int checkPipe(char *original){
 
+    //Make a copy of the string
+    char *cmd = strdup(original);
+    
     if(strstr(cmd, "|"))
         return 1;
     else
@@ -197,8 +209,11 @@ int checkPipe(char *cmd){
 
 
 /*---------------------Check_Redirection---------------------------*/
-int checkRedirection(char *cmd){
+int checkRedirection(char *original){
 
+    //Make a copy of the string
+    char *cmd = strdup(original);
+    
     if(strstr(cmd, ">"))
         return 1;
     else if(strstr(cmd, "<"))
@@ -209,43 +224,70 @@ int checkRedirection(char *cmd){
 
 
 /*---------------------Check_Custom_Command---------------------------*/
-int checkCustom(char *cmd){
+int checkCustom(char *original){
+
+    //Make a copy of the string
+    char *cmd = strdup(original);
+    
+
+    //Here add that processing of cmd
+    char *file;
+    char *rest; 
+    char *arguments[10];
+
+    int argc = 0;    
+
+    file = strtok(cmd, " ");
+
+    rest = strtok(NULL, "");
+
+    arguments[argc++] = file;
+
+    char *arg = strtok(rest, " ");
+
+    while(arg != NULL){
+
+        arguments[argc++] = arg;
+        arg = strtok(NULL, " ");
+    }
+
+    arguments[argc] = NULL;
 
     // Checks for exit
-    if(strstr(cmd, "exit")){
+    if(strstr(file, "exit")){
         exit(0);
     }
 
     // Checks for help
-    if(strstr(cmd, "help")){
+    if(strstr(file, "help")){
 
         help();
         return 1;
     }
 
     // Checks for version
-    if(strstr(cmd, "version")){
+    if(strstr(file, "version")){
 
         version();
         return 1;
     }
 
     // Checks for catt
-    if(strstr(cmd, "catt")){
+    if(strstr(file, "catt")){
 
-        //catt();
+        catt(argc, arguments);
         return 1;
     }
 
     // Checks for headd
-    if(strstr(cmd, "headd")){
+    if(strstr(file, "headd")){
 
-        //headd();
+        headd(argc, arguments);
         return 1;
     }
 
     // Checks for envv
-    if(strstr(cmd, "envv")){
+    if(strstr(file, "envv")){
 
         envv();
         return 1;
@@ -302,118 +344,203 @@ void envv(){
 
         printf("%s\n", *env);
     }
-    //fclose(stdout);
-    //close(1);
 }
 
 
 /*---------------------------CATT-------------------------------------*/
-void catt(int argc, char *argv[]){
+void catt(int argc, char *argv[]) {
+    int i, bflag = 0, Eflag = 0, nflag = 0, sflag = 0;
+    char *file;
+    char last_char = '\0';
+    int line = 1;
+    int line_printed = 0;
 
-    // Check if any file names were passed as arguments
-    if(argc < 2){
-    
-        // If not, read from stdin
-        char c;
-        while((c = getchar()) != EOF){
-        
-            putchar(c);
-        }
-    }
-    else{
-    
-        // If file names were passed as arguments, read from each file
-        for(int i = 1; i < argc; i++){
-        
-            // Open the file
-            FILE *fp = fopen(argv[i], "r");
-            if(fp == NULL){
-            
-                fprintf(stderr, "Error: Could not open file %s\n", argv[i]);
-                continue;
+    for (i = 1; i < argc; i++) {
+        if (argv[i][0] == '-') {
+            switch (argv[i][1]) {
+                case 'b':
+                    bflag = 1;
+                    break;
+                case 'E':
+                    Eflag = 1;
+                    break;
+                case 'n':
+                    nflag = 1;
+                    break;
+                case 's':
+                    sflag = 1;
+                    break;
+                default:
+                    printf("cat: invalid option -- '%c'\n", argv[i][1]);
+                    exit(1);
             }
-
-            // Read the contents of the file and print to stdout
-            char c;
-            while((c = fgetc(fp)) != EOF){
-            
-                putchar(c);
-            }
-
-            // Close the file
-            fclose(fp);
+        } else {
+            file = argv[i];
+            break;
         }
     }
 
+    if (file == NULL) {
+        printf("cat: missing file operand\n");
+        exit(1);
+    }
+
+    FILE *fp = fopen(file, "r");
+
+    if (fp == NULL) {
+        printf("cat: %s: No such file or directory\n", file);
+        exit(1);
+    }
+
+    int c, next_c;
+    int bflag_line = 1;
+    while ((c = fgetc(fp)) != EOF) {
+        if(sflag && last_char == '\n' && c == '\n'){
+            while(c == '\n'){
+                c = fgetc(fp);
+            }
+            putchar('\n');
+        }
+        if (last_char == '\n') {
+            //putchar(c);
+            line_printed = 0;
+        }
+        if (bflag && c == '\n' && last_char == '\n') {
+            putchar('\n');
+            continue;
+        }
+        else if(bflag && !line_printed){
+            printf("%d ", bflag_line);
+            line_printed = 1;
+            bflag_line++;
+        }
+        if (nflag && !line_printed && !bflag) {
+            
+            printf("%d ", line);
+            line_printed = 1;
+            line++;
+            
+        }
+        if (Eflag && c == '\n') {
+            putchar('$');
+            //putchar(c);
+        }
+        putchar(c);
+
+        last_char = c;
+    }
+
+
+    fclose(fp);
 }
+
+
 
 
 /*---------------------------HEADD-------------------------------------*/
-void headd(int argc, char *argv[]){
-
+void headd(int argc, char *argv[]) {
     // Set the default number of lines to print to 10
     int num_lines = 10;
+    int num_bytes = -1;
+    int quiet = 0;
+    int verbose = 0;
 
-    // Check if the -n flag was used to specify a different number of lines
-    if(argc > 2 && argv[1][0] == '-' && argv[1][1] == 'n'){
-
-        // Parse the number of lines from the argument
-        num_lines = atoi(argv[2]);
-        argc -= 2;
-        argv += 2;
-    }
-
-    // Check if any file names were passed as arguments
-    if(argc < 2){
-
-        // If not, read from stdin
-        char c;
-        int lines_printed = 0;
-        while((c = getchar()) != EOF && lines_printed < num_lines){
-
-            putchar(c);
-            if (c == '\n'){
-
-                lines_printed++;
-            }
+    // Parse command line options
+    int opt;
+    while ((opt = getopt(argc, argv, "c:n:qv")) != -1) {
+        switch (opt) {
+            case 'c':
+                num_bytes = atoi(optarg);
+                break;
+            case 'n':
+                num_lines = atoi(optarg);
+                break;
+            case 'q':
+                quiet = 1;
+                break;
+            case 'v':
+                verbose = 1;
+                break;
+            default: /* '?' */
+                fprintf(stderr, "Usage: %s [-c num_bytes] [-n num_lines] [-q] [-v] [file...]\n", argv[0]);
+                exit(EXIT_FAILURE);
         }
     }
-    else{
+    argc -= optind;
+    argv += optind;
 
+    // Check if any file names were passed as arguments
+    if (argc < 1) {
+        // If not, read from stdin
+        int lines_printed = 0;
+        int bytes_printed = 0;
+        int c;
+        while ((c = getchar()) != EOF && (lines_printed < num_lines || num_lines == -1) && (bytes_printed < num_bytes || num_bytes == -1)) {
+            putchar(c);
+            if (c == '\n') {
+                lines_printed++;
+            }
+            bytes_printed++;
+        }
+    } else {
         // If file names were passed as arguments, read from each file
-        for(int i = 1; i < argc; i++){
-
+        for (int i = 0; i < argc; i++) {
             // Open the file
             FILE *fp = fopen(argv[i], "r");
-            if(fp == NULL){
-            
+            if (fp == NULL) {
                 fprintf(stderr, "Error: Could not open file %s\n", argv[i]);
                 continue;
             }
 
-            // Read the first num_lines lines of the file and print to stdout
-            char c;
-            int lines_printed = 0;
-            while((c = fgetc(fp)) != EOF && lines_printed < num_lines){
-            
-                putchar(c);
-                if(c == '\n'){
+            if(!quiet && verbose){
+
+                printf("==> %s <==\n", argv[i]);
                 
+            }
+            // Read the first num_lines lines of the file and print to stdout
+            int lines_printed = 0;
+            int bytes_printed = 0;
+            int c;
+            while ((c = fgetc(fp)) != EOF && (lines_printed < num_lines || num_lines == -1) && (bytes_printed < num_bytes || num_bytes == -1)) {
+                if(num_bytes != -1){
+                    if(bytes_printed < num_bytes){
+                        putchar(c);
+                        bytes_printed++;
+                    }
+                }
+                else{
+                    putchar(c);
+                }
+                if(c == '\n'){
                     lines_printed++;
                 }
+
+                /*putchar(c);
+                if (c == '\n') {
+                    lines_printed++;
+                }
+                bytes_printed++;*/
             }
 
             // Close the file
             fclose(fp);
         }
     }
-
+    optind = 0;
+    optarg = NULL;
+    opterr = 0;
 }
 
 
-/*---------------------Execute_Command---------------------------*/
-void execCommand(char *cmd){
 
+
+
+/*---------------------Execute_Command---------------------------*/
+void execCommand(char *original){
+
+    //Make a copy of the string
+    char *cmd = strdup(original);
+    
     char *file;
     char *rest; 
     char *arguments[10];
@@ -460,7 +587,20 @@ void execCommand(char *cmd){
 
         if(i == (path_size - 1) && access(filename, F_OK) != 0){
 
-            printf("\nError: Command not found.\n");
+        
+        
+            char check_command[100] = "hash ";
+            strcat(check_command, file);
+
+            if(checkBuiltin(check_command)){
+                success = 1;
+                filename = malloc(strlen(file) * sizeof(char) + 1);
+                strcpy(filename, file);
+            }
+            else{
+                
+                printf("\nError: Command not found.\n");
+            }
         }
     }
 
@@ -479,8 +619,6 @@ void execCommand(char *cmd){
         exit(1);
     }
     else if(process == 0){
-        //char *argv[] = {filename, arguments, NULL};
-        //execve(filename, argv, NULL);
         execve(filename, arguments, NULL);
     }
     else{
@@ -494,8 +632,11 @@ void execCommand(char *cmd){
 
 
 /*---------------------Execute_Pipe---------------------------*/
-void execPipe(char *cmd){
+void execPipe(char *original){
 
+    //Make a copy of the string
+    char *cmd = strdup(original);
+    
     char *first_cmd;
     char *second_cmd;
 
@@ -560,18 +701,16 @@ void execPipe(char *cmd){
             perror("Error trying to duplicate output");
             exit(3);
         }
-        //close(fd[1]);
-        //close(fd[0]);
+        printf("\nDup2 return value: %d.\n", dup2(fd[1], STDOUT_FILENO));
+
         if(checkCustom(cmd1)){
+            printf("\nDup2 return value: %d.\n", dup2(fd[1], STDOUT_FILENO));
             exit(0);
         }
         execvp(cmd1, cmd1_args);
         
-        //execvp(cmd1, cmd1_args);
-        //envv();
-        close(1);
+        //close(1);
         close(fd[1]);
-        //exit(0);
     }
 
     if ((id2 = fork()) < 0)
@@ -600,5 +739,91 @@ void execPipe(char *cmd){
     waitpid(id, NULL,  0);
     waitpid(id2, NULL, 0);
 }
+
+
+
+
+
+
+void execRedirection(char *original) {
+
+    //Make a copy of the string
+    char *cmd = strdup(original);
+    
+    char *first_cmd;
+    char *file;
+
+    first_cmd = strtok(cmd, ">");
+    file = strtok(NULL, "") + 1;
+
+    //Start the processing of the first command
+    char *first_token = strtok(first_cmd, " ");
+
+    char *cmd1 = first_token;
+
+    char *cmd1_args[10];
+
+    int argc_1 = 0;
+
+    while(first_token != NULL){
+
+        cmd1_args[argc_1] = first_token;
+        argc_1++;
+        first_token = strtok(NULL, " ");
+    }
+    
+    cmd1_args[argc_1] = NULL;
+
+
+    int fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR);
+    if (fd == -1) {
+        perror("Error opening file");
+        exit(EXIT_FAILURE);
+    }
+
+    int pid = fork();
+    if (pid == -1) {
+        perror("Error forking process");
+        exit(EXIT_FAILURE);
+    }
+
+    if (pid == 0) {
+        dup2(fd, 1);
+        close(fd);
+        execvp(cmd1, cmd1_args);
+        perror("Error executing command");
+        exit(EXIT_FAILURE);
+    }
+    else {
+        close(fd);
+        wait(NULL);
+    }
+}
+
+
+
+int checkBuiltin(char *original){
+
+    //Make a copy of the string
+    char *cmd = strdup(original);
+
+    int ret = system(cmd);
+    if (ret == -1) {
+        perror("Error executing command");
+        exit(EXIT_FAILURE);
+    }
+    return (ret == 127) ? 0 : 1;
+}
+
+
+
+
+
+
+
+
+
+
+
 
 
